@@ -1,6 +1,23 @@
 import { NextResponse } from "next/server";
 import { getAdminUser } from "@/lib/supabase/session";
 import { authorizeDocumentIntake } from "@/lib/services/knowledge-processing/intake";
+import { listDocuments } from "@/lib/services/knowledge-processing/documents-query";
+
+// Documents list Route Handler (Phase 4, Increment 2). Boundary validation
+// only (there is no request body to validate for a list request); the
+// Knowledge Processing Service owns the read itself — this handler never
+// queries the `documents` table directly.
+export async function GET() {
+  const user = await getAdminUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const documents = await listDocuments();
+
+  return NextResponse.json({ documents });
+}
 
 // Documents upload-authorization Route Handler (Phase 4, Increment 1
 // revision). Boundary validation only — structural request-contract shape.
