@@ -1,6 +1,8 @@
 import "server-only";
+import { after } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createUploadIntentToken, verifyUploadIntentToken } from "./upload-intent-token";
+import { INTERNAL_SERVICE_SECRET_HEADER } from "./internal-auth";
 
 // Knowledge Processing Service — document-intake policy (Phase 4,
 // Increment 1 revision). These values govern Version 1 document-intake
@@ -184,6 +186,15 @@ export async function confirmDocumentIntake(
     throw new Error(`Failed to create document record: ${insertError.message}`);
   }
 
+  // Approved trigger architecture (Phase 4, Increment 3): confirmDocumentIntake
+  // -> after() -> internal authenticated processing Route Handler ->
+  // Knowledge Processing Service. Triggered only on a genuine first-time
+  // Document creation, never on the 23505 duplicate/race-return path above
+  // -- that path returns a Document that may already be processing or
+  // further along, and must never be reprocessed from here (processDocument
+  // also independently guards this by status).
+  triggerAsynchronousProcessing(inserted.id);
+
   return {
     accepted: true,
     document: {
@@ -193,4 +204,60 @@ export async function confirmDocumentIntake(
       storageReference: inserted.storage_reference ?? storagePath,
     },
   };
+}
+
+// Resolves this deployment's own base URL for a server-to-server call.
+// VERCEL_URL is automatically injected by the platform for every
+// deployment (production, preview, and internal); no new environment
+// variable is introduced. Falls back to localhost for local development.
+function resolveInternalBaseUrl(): string {
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
+  }
+
+  return `http://localhost:${process.env.PORT ?? 3000}`;
+}
+
+// Invokes the internal processing Route Handler from within after(), so the
+// call is not a detached/fire-and-forget fetch (it is awaited, and kept
+// alive past the response via the platform's waitUntil) and does not block
+// the client-facing upload-completion response (after() runs only once that
+// response has been sent). The internal Route Handler runs as its own,
+// independently budgeted serverless invocation -- this is a working
+// implementation hypothesis pending empirical capacity validation, not a
+// confirmed guarantee (see Increment 3 evidence-gathering).
+function triggerAsynchronousProcessing(documentId: string): void {
+  after(async () => {
+    try {
+      const secret = process.env.INTERNAL_SERVICE_SECRET;
+
+      if (!secret) {
+        throw new Error("Missing INTERNAL_SERVICE_SECRET server configuration.");
+      }
+
+      const response = await fetch(
+        `${resolveInternalBaseUrl()}/api/v1/internal/documents/process`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            [INTERNAL_SERVICE_SECRET_HEADER]: secret,
+          },
+          body: JSON.stringify({ documentId }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Internal processing trigger returned status ${response.status}.`);
+      }
+    } catch {
+      // The trigger invocation itself failed (network error, missing
+      // secret, non-2xx response). The Document remains in `uploaded`
+      // status rather than being silently marked otherwise -- this is
+      // visible via existing Document status retrieval (Increment 2), not
+      // swallowed. No retry is implemented in this increment (see
+      // Increment 3 evidence-gathering: durability gap, not addressed
+      // here without further CSA direction).
+    }
+  });
 }
