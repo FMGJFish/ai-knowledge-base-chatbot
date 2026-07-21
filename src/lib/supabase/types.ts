@@ -1,5 +1,6 @@
-// Generated from the Staging Supabase project schema (Phase 4, Increment 3
-// migration: documents.processing_error).
+// Generated from the Staging Supabase project schema (Phase 5, Increment 1
+// migrations: chatbot_configuration.similarity_threshold/top_k,
+// match_document_chunks).
 // Regenerate whenever the schema changes; do not hand-edit.
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -42,6 +43,8 @@ export type Database = {
           instructions: string | null;
           name: string;
           public_chatbot_identifier: string | null;
+          similarity_threshold: number;
+          top_k: number;
           welcome_message: string | null;
         };
         Insert: {
@@ -49,6 +52,8 @@ export type Database = {
           instructions?: string | null;
           name?: string;
           public_chatbot_identifier?: string | null;
+          similarity_threshold?: number;
+          top_k?: number;
           welcome_message?: string | null;
         };
         Update: {
@@ -56,6 +61,8 @@ export type Database = {
           instructions?: string | null;
           name?: string;
           public_chatbot_identifier?: string | null;
+          similarity_threshold?: number;
+          top_k?: number;
           welcome_message?: string | null;
         };
         Relationships: [];
@@ -177,7 +184,20 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      match_document_chunks: {
+        Args: {
+          match_count: number;
+          match_threshold: number;
+          query_embedding: string;
+        };
+        Returns: {
+          chunk_id: string;
+          chunk_order: number;
+          content: string;
+          document_id: string;
+          similarity: number;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;
