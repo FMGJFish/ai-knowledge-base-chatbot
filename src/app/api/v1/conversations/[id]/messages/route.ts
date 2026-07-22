@@ -7,16 +7,18 @@ import {
 } from "@/lib/services/conversation/conversation";
 import { retrieveRelevantChunks } from "@/lib/services/retrieval/retrieve";
 import { generateResponse } from "@/lib/services/ai-response/generate";
+import { enforceRateLimit } from "@/lib/services/rate-limit/rate-limit";
+import { getClientIp } from "@/lib/services/rate-limit/request";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Messages API resource (Phase 7, Increment 1). The sole Route Handler
+// Messages API resource (Phase 7, Increments 1-2). The sole Route Handler
 // authorized to orchestrate the Conversation Service, Retrieval Service,
 // and AI Response Service in sequence, per ADR Decision 015 and the Chief
 // Systems Architect Decision 001 precedent (Phase 6, Increment 2), now
-// extended to a three-service chain. Boundary validation and orchestration
-// only -- no ranking, filtering, embedding, generation, or persistence
-// logic of its own.
+// extended to a three-service chain. Boundary validation, layered
+// rate-limit enforcement, and orchestration only -- no ranking, filtering,
+// embedding, generation, or persistence logic of its own.
 //
 // Operates only within an existing, non-expired conversation (ADR Decision
 // 020) -- never creates one. An expired or unrecognized conversation
@@ -25,6 +27,12 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 //
 // Temporarily admin-gated -- see conversations/route.ts for rationale;
 // removed in Increment 3.
+//
+// Rate-limit enforcement (Phase 7, Increment 2): the per-client-IP layer
+// is evaluated first; an IP-layer rejection returns immediately without
+// touching the Public Chatbot Identifier layer at all
+// (phase7_execution_strategy_v1.md, Increment 2 Architectural
+// Determinations -- hierarchical quota-consumption policy).
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getAdminUser();
 
@@ -50,10 +58,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { content } = body as Record<string, unknown>;
+  const { content, publicChatbotIdentifier } = body as Record<string, unknown>;
 
   if (typeof content !== "string" || content.trim().length === 0) {
     return NextResponse.json({ error: "A non-empty content is required" }, { status: 400 });
+  }
+
+  if (typeof publicChatbotIdentifier !== "string" || !UUID_PATTERN.test(publicChatbotIdentifier)) {
+    return NextResponse.json(
+      { error: "A valid UUID publicChatbotIdentifier is required" },
+      { status: 400 }
+    );
+  }
+
+  const rateLimitResult = await enforceRateLimit(getClientIp(request), publicChatbotIdentifier);
+
+  if (!rateLimitResult.allowed) {
+    if (rateLimitResult.reason === "invalid_chatbot_identifier") {
+      return NextResponse.json({ error: "invalid_chatbot_identifier" }, { status: 400 });
+    }
+
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const trimmedContent = content.trim();

@@ -1,6 +1,8 @@
 // Generated from the Staging Supabase project schema (Phase 5, Increment 1
 // migrations: chatbot_configuration.similarity_threshold/top_k,
-// match_document_chunks).
+// match_document_chunks; Phase 7, Increment 2 migrations:
+// rate_limit_counters, increment_rate_limit_counter,
+// cleanup_stale_rate_limit_counters).
 // Regenerate whenever the schema changes; do not hand-edit.
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -179,11 +181,49 @@ export type Database = {
           },
         ];
       };
+      rate_limit_counters: {
+        Row: {
+          id: string;
+          key_value: string;
+          layer: string;
+          request_count: number;
+          updated_at: string;
+          window_start: string;
+        };
+        Insert: {
+          id?: string;
+          key_value: string;
+          layer: string;
+          request_count?: number;
+          updated_at?: string;
+          window_start: string;
+        };
+        Update: {
+          id?: string;
+          key_value?: string;
+          layer?: string;
+          request_count?: number;
+          updated_at?: string;
+          window_start?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
+      cleanup_stale_rate_limit_counters: {
+        Args: { p_batch_size: number; p_retention_seconds: number };
+        Returns: number;
+      };
+      increment_rate_limit_counter: {
+        Args: { p_key_value: string; p_layer: string; p_window_seconds: number };
+        Returns: {
+          out_request_count: number;
+          out_window_start: string;
+        }[];
+      };
       match_document_chunks: {
         Args: {
           match_count: number;
