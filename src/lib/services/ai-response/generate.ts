@@ -2,23 +2,33 @@ import "server-only";
 import { getChatbotConfiguration, type ChatbotConfiguration } from "./config";
 import type { RetrievedChunk } from "@/lib/services/retrieval/retrieve";
 
-// AI Response Service (Phase 6, Increment 1). Owns prompt construction and
-// configured chat-completion invocation. Stateless and input-driven: never
-// retrieves (Retrieval Service, Phase 5), never persists (Conversation
-// Service, Phase 7), never calls another service directly, and never
-// authenticates or validates a request (Route Handler). Conversation
-// history is intentionally not a parameter of this increment -- its
-// contract has not yet been established (phase6_execution_strategy_v1.md,
-// Increment 1 Boundary) and is deferred to whichever future increment or
-// phase first defines it, rather than invented here.
+// AI Response Service (Phase 6, Increment 1; history support added Phase 7,
+// Increment 1). Owns prompt construction and configured chat-completion
+// invocation. Stateless and input-driven: never retrieves (Retrieval
+// Service, Phase 5), never persists (Conversation Service, Phase 7), never
+// calls another service directly, and never authenticates or validates a
+// request (Route Handler). Conversation history is an optional input
+// supplied by the invoking Route Handler, per
+// technical_specification_v1.md's AI Integration section ("When the
+// invoking Route Handler supplies zero or more prior conversation messages
+// as an input, the AI Response Service incorporates them into the
+// prompt") -- this service still never retrieves, persists, or requires
+// history itself; the Messages Route Handler (phase7_execution_strategy_v1.md,
+// Increment 1) is solely responsible for fetching it from the Conversation
+// Service and supplying it here.
 //
-// Response contract note: this increment returns response text only. This
-// is Version 1 of the service contract, not its permanent shape -- the
+// Response contract note: this service returns response text only. This
+// remains Version 1 of the service contract, not its permanent shape -- the
 // internal chat-completion call already has access to the full provider
 // response body before extracting content, so a future increment can
 // extend the return value (citations, usage, finish reason, safety
 // metadata) without restructuring this module. Nothing beyond text is
 // implemented here.
+
+export interface ConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
 const CHAT_COMPLETIONS_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 
 // Bounded retry only, mirroring the rate-limit resilience already
@@ -168,6 +178,7 @@ function buildContextBlock(chunks: RetrievedChunk[]): string {
 async function callChatCompletion(
   systemPrompt: string,
   question: string,
+  history: ConversationMessage[],
   apiKey: string,
   model: string
 ): Promise<string> {
@@ -184,6 +195,7 @@ async function callChatCompletion(
         model,
         messages: [
           { role: "system", content: systemPrompt },
+          ...history.map((message) => ({ role: message.role, content: message.content })),
           { role: "user", content: question },
         ],
       }),
@@ -254,7 +266,8 @@ async function callChatCompletion(
 // configuration itself.
 export async function generateResponse(
   question: string,
-  retrievedChunks: RetrievedChunk[]
+  retrievedChunks: RetrievedChunk[],
+  history: ConversationMessage[] = []
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -266,5 +279,5 @@ export async function generateResponse(
   const contextBlock = buildContextBlock(retrievedChunks);
   const systemPrompt = buildSystemPrompt(config, contextBlock);
 
-  return callChatCompletion(systemPrompt, question, apiKey, model);
+  return callChatCompletion(systemPrompt, question, history, apiKey, model);
 }
