@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { getAdminUser } from "@/lib/supabase/session";
 import {
   getActiveConversation,
   getConversationHistory,
@@ -12,7 +11,7 @@ import { getClientIp } from "@/lib/services/rate-limit/request";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Messages API resource (Phase 7, Increments 1-2). The sole Route Handler
+// Messages API resource (Phase 7, Increments 1-3). The sole Route Handler
 // authorized to orchestrate the Conversation Service, Retrieval Service,
 // and AI Response Service in sequence, per ADR Decision 015 and the Chief
 // Systems Architect Decision 001 precedent (Phase 6, Increment 2), now
@@ -25,8 +24,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // returns an explicit response directing the client back to the
 // Conversations resource, rather than silently creating a replacement.
 //
-// Temporarily admin-gated -- see conversations/route.ts for rationale;
-// removed in Increment 3.
+// Public and unauthenticated -- see conversations/route.ts for the
+// Increment 3 rationale (Increment 1's Applied Interpretation).
 //
 // Rate-limit enforcement (Phase 7, Increment 2): the per-client-IP layer
 // is evaluated first; an IP-layer rejection returns immediately without
@@ -34,12 +33,6 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // (phase7_execution_strategy_v1.md, Increment 2 Architectural
 // Determinations -- hierarchical quota-consumption policy).
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const user = await getAdminUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   const { id } = await params;
 
   if (!UUID_PATTERN.test(id)) {

@@ -1,25 +1,25 @@
 import { NextResponse } from "next/server";
-import { getAdminUser } from "@/lib/supabase/session";
 import { createConversation } from "@/lib/services/conversation/conversation";
 import { enforceRateLimit } from "@/lib/services/rate-limit/rate-limit";
 import { getClientIp } from "@/lib/services/rate-limit/request";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Conversations API resource (Phase 7, Increments 1-2). Creates a new
+// Conversations API resource (Phase 7, Increments 1-3). Creates a new
 // conversation for a visitor session, per 04_api_design_v1.md and ADR
 // Decision 020 -- conversation creation is exclusively an explicit
 // Conversations-resource action; the Messages resource never creates one
-// implicitly. Boundary validation only: authentication, request
-// validation, layered rate-limit enforcement, delegation to the
-// Conversation Service, and response formatting.
+// implicitly. Boundary validation only: request validation, layered
+// rate-limit enforcement, delegation to the Conversation Service, and
+// response formatting.
 //
-// Temporarily admin-gated (phase7_execution_strategy_v1.md, Increment 1
-// Evaluation requirements: verified using "a temporary, admin-gated
-// verification interface mirroring the Phase 5 and Phase 6 pattern"). This
-// gate is removed in Increment 3 once the real anonymous visitor path is
-// ready -- it is not a permanent authentication requirement for this
-// resource.
+// Public and unauthenticated (Phase 7, Increment 3): the temporary
+// administrator gate carried from Increment 1's verification-only
+// deployment has been removed here, per Increment 1's own recorded
+// Applied Interpretation authorizing its removal "during Increment 3
+// public exposure." The Public Chatbot Identifier remains identification,
+// not authentication (ADR Decision 011); layered rate limiting (below) is
+// this endpoint's sole protection against abuse.
 //
 // Rate-limit enforcement (Phase 7, Increment 2): the per-client-IP layer
 // is evaluated first; an IP-layer rejection returns immediately without
@@ -27,12 +27,6 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // (phase7_execution_strategy_v1.md, Increment 2 Architectural
 // Determinations -- hierarchical quota-consumption policy).
 export async function POST(request: Request) {
-  const user = await getAdminUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   let body: unknown;
 
   try {
