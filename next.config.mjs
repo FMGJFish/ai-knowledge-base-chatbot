@@ -19,6 +19,43 @@ const nextConfig = {
   // bundler-integration setting only -- it does not change what
   // text-extraction.ts calls or how it behaves.
   serverExternalPackages: ["pdf-parse"],
+  // Frame-embedding policy (Phase 7, Increment 3, Task 3; AD-026). Exactly
+  // one route -- /widget, the reserved iframe-hosted widget interface --
+  // may be framed, and only by an HTTPS origin. The second source matches
+  // every other terminal application route and denies framing entirely.
+  // /widget/ (trailing slash) technically matches both raw source
+  // patterns, but Next.js's own trailing-slash normalization issues a
+  // framework-generated 308 redirect to /widget before either header set
+  // is applied; that redirect carries neither custom header, and the
+  // canonical /widget response it points to receives only the allow
+  // policy. No terminal rendered response ever receives both the allow
+  // and deny policies together.
+  async headers() {
+    return [
+      {
+        source: "/widget",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors https:",
+          },
+        ],
+      },
+      {
+        source: "/((?!widget$).*)",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'",
+          },
+          {
+            key: "X-Frame-Options",
+            value: "DENY",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
