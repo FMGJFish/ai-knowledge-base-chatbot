@@ -7,6 +7,15 @@ import {
   sendMessage,
   type ApiErrorKind,
 } from "@/lib/widget-client/api";
+import {
+  COLLAPSED_DIMENSIONS,
+  EXPANDED_DIMENSIONS,
+  postInitFailure,
+  postReady,
+  postResizeRequired,
+  postStateChanged,
+  postTeardown,
+} from "@/lib/widget-client/parent-channel";
 import { ChatPanel, type ChatMessage } from "./chat-panel";
 import { WidgetUnavailable } from "./widget-unavailable";
 
@@ -68,6 +77,7 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
       if (!result.ok) {
         if (result.kind === "invalid_identifier") {
           setConfigStatus("unavailable");
+          postInitFailure("invalid_identifier");
         } else {
           setConfigStatus("degraded");
           setSendErrorMessage(
@@ -95,6 +105,30 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
     }
 
     wasOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  // Parent-widget protocol (Task 4B, AD-027): announce readiness once,
+  // and notify on teardown (pagehide fires reliably when this iframe is
+  // removed or navigated away from, regardless of how the host page
+  // removes it).
+  useEffect(() => {
+    postReady();
+
+    window.addEventListener("pagehide", postTeardown);
+
+    return () => {
+      window.removeEventListener("pagehide", postTeardown);
+      postTeardown();
+    };
+  }, []);
+
+  // Every open/close toggle is both a presentation-state change and a
+  // required container-size change (AD-025); the two message categories
+  // stay separate on the wire even though this app always emits them
+  // together.
+  useEffect(() => {
+    postStateChanged(isOpen ? "open" : "closed");
+    postResizeRequired(isOpen ? EXPANDED_DIMENSIONS : COLLAPSED_DIMENSIONS);
   }, [isOpen]);
 
   if (configStatus === "unavailable") {
