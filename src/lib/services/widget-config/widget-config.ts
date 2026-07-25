@@ -1,5 +1,6 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
+import type { PublicWidgetConfiguration } from "@/lib/contracts/widget-config";
 
 // Widget Configuration Service — resolves the public-safe subset of
 // Chatbot Configuration for the widget bootstrap endpoint (Phase 7,
@@ -10,10 +11,11 @@ import { createServiceClient } from "@/lib/supabase/server";
 // not yet implemented) and introduces no new persistent entity -- it
 // reads the same single-row table Increment 2's Rate Limit Service
 // already reads.
-export type PublicWidgetConfiguration = {
-  name: string;
-  welcomeMessage: string | null;
-};
+//
+// The PublicWidgetConfiguration contract lives in
+// src/lib/contracts/widget-config.ts (Phase 7, Increment 3, Task 4A) so
+// the browser widget client can depend on the shape without importing
+// this server-only module.
 
 export async function getPublicWidgetConfiguration(): Promise<PublicWidgetConfiguration | null> {
   const supabase = createServiceClient();
