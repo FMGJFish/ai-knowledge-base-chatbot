@@ -29,3 +29,9 @@ Thumbs.db
 # Editor
 .vscode/*
 !.vscode/extensions.json
+
+# Vercel CLI local project link metadata
+.vercel
+
+.vercel
+.env*

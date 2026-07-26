@@ -10,7 +10,12 @@ import type { PublicWidgetConfiguration } from "@/lib/contracts/widget-config";
 // introducing a parallel one.
 
 export type ApiErrorKind =
-  "invalid_identifier" | "rate_limited" | "malformed_response" | "network_error" | "unknown_error";
+  | "invalid_identifier"
+  | "rate_limited"
+  | "conversation_expired"
+  | "malformed_response"
+  | "network_error"
+  | "unknown_error";
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; kind: ApiErrorKind };
 
@@ -34,6 +39,15 @@ function classifyErrorResponse(status: number, body: unknown): ApiErrorKind {
 
   if (errorCode === "invalid_chatbot_identifier") {
     return "invalid_identifier";
+  }
+
+  // The Messages resource's explicit rejection for a missing or expired
+  // conversation (ADR Decision 020; consumed here per AD-029). Transport
+  // and classification only -- this module does not clear storage,
+  // create a replacement conversation, resubmit, or decide UI behavior;
+  // that orchestration belongs to widget-app.tsx.
+  if (status === 404 && errorCode === "conversation_not_found_or_expired") {
+    return "conversation_expired";
   }
 
   return "unknown_error";

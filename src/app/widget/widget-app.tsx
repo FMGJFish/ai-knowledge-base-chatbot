@@ -16,6 +16,8 @@ import {
   postStateChanged,
   postTeardown,
 } from "@/lib/widget-client/parent-channel";
+import { runConversationContinuationLifecycle } from "@/lib/widget-client/message-lifecycle";
+import { createWidgetStorage } from "@/lib/widget-client/storage";
 import { ChatPanel, type ChatMessage } from "./chat-panel";
 import { WidgetUnavailable } from "./widget-unavailable";
 
@@ -29,6 +31,7 @@ function describeError(kind: ApiErrorKind): string {
       return "This chat widget is not configured correctly.";
     case "network_error":
       return "Could not reach the chat service. Check your connection and try again.";
+    case "conversation_expired":
     case "malformed_response":
     case "unknown_error":
     default:
@@ -41,23 +44,48 @@ type WidgetAppProps = {
 };
 
 // Top-level orchestrator for the Public Chat Widget (Phase 7, Increment
-// 3, Task 4A): floating launcher, config loading, lazy conversation
-// creation (AD-021), and multi-turn message exchange -- all scoped to a
-// single page load. No localStorage, no parent-page communication, no
-// expiry re-establishment: those remain Task 4B/4C/4D per this slice's
-// Boundary and Non-Goals.
+// 3): floating launcher, config loading, lazy conversation creation
+// (AD-021), multi-turn message exchange, and -- as of Task 4C --
+// cross-reload continuity via the storage abstraction (AD-022,
+// AD-029). No localStorage access happens directly in this file; all
+// storage mechanics are owned by src/lib/widget-client/storage.ts. This
+// component only decides *when* persisted values are hydrated,
+// persisted, cleared, or replaced.
 export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [configStatus, setConfigStatus] = useState<ConfigStatus>("loading");
   const [chatbotName, setChatbotName] = useState<string | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
 
-  // Ephemeral, in-memory-only for this slice (AD-021 scope note): a page
-  // reload generates a new value. Persisting it across reloads is Task
-  // 4C's responsibility (AD-022/AD-029), not this slice's.
-  const [visitorSessionId] = useState(() => crypto.randomUUID());
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // One storage controller for this mounted widget instance. Reading it
+  // synchronously up front (no network involved) is what makes
+  // restoration possible without ever issuing a network call on mount --
+  // preserving AD-021's lazy-creation timing exactly.
+  const [storage] = useState(() => createWidgetStorage(publicChatbotIdentifier));
+  const [restored] = useState(() => storage.load());
+
+  // Reused across reloads when storage is available (ADR Decision 006);
+  // generated fresh, and persisted, when no valid cached value exists
+  // (first-ever visit, or storage was unavailable so nothing was ever
+  // persisted). Never cleared or regenerated when a conversation expires
+  // -- only conversationId/transcript are cleared in that case.
+  const [visitorSessionId] = useState<string>(() => {
+    if (restored.visitorSessionId) {
+      return restored.visitorSessionId;
+    }
+
+    const generated = crypto.randomUUID();
+    storage.persistVisitorSessionId(generated);
+    return generated;
+  });
+
+  // conversationId/messages are restored as unconfirmed, presentational
+  // values only (AD-022) -- restoring them here asserts nothing about
+  // whether the server-side conversation is still active. Validity is
+  // determined solely by the server, and only when the visitor next
+  // intentionally sends a message.
+  const [conversationId, setConversationId] = useState<string | null>(restored.conversationId);
+  const [messages, setMessages] = useState<ChatMessage[]>(restored.transcript);
   const [composerValue, setComposerValue] = useState("");
   const [pending, setPending] = useState(false);
   const [sendErrorMessage, setSendErrorMessage] = useState<string | null>(null);
@@ -65,6 +93,11 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
   const launcherRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const wasOpenRef = useRef(false);
+
+  // Synchronous re-entrancy guard: prevents a second send/recovery
+  // lifecycle from starting while one is unresolved, independent of
+  // `pending`'s React-state update timing.
+  const sendLifecycleActiveRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,7 +143,7 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
   // Parent-widget protocol (Task 4B, AD-027): announce readiness once,
   // and notify on teardown (pagehide fires reliably when this iframe is
   // removed or navigated away from, regardless of how the host page
-  // removes it).
+  // removes it). Unaffected by Task 4C.
   useEffect(() => {
     postReady();
 
@@ -125,7 +158,7 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
   // Every open/close toggle is both a presentation-state change and a
   // required container-size change (AD-025); the two message categories
   // stay separate on the wire even though this app always emits them
-  // together.
+  // together. Unaffected by Task 4C.
   useEffect(() => {
     postStateChanged(isOpen ? "open" : "closed");
     postResizeRequired(isOpen ? EXPANDED_DIMENSIONS : COLLAPSED_DIMENSIONS);
@@ -135,46 +168,148 @@ export function WidgetApp({ publicChatbotIdentifier }: WidgetAppProps) {
     return <WidgetUnavailable />;
   }
 
-  async function handleSend() {
-    const content = composerValue.trim();
+  function updateConversationId(id: string | null) {
+    setConversationId(id);
+    storage.persistConversationId(id);
+  }
 
-    if (!content || pending) {
+  // Clears only the stale conversation/transcript state -- visitorSessionId
+  // is deliberately untouched, per AD-029 and this slice's acceptance
+  // criteria that the visitor session identifier survives a
+  // stale-conversation clear.
+  function clearStaleConversationState() {
+    setConversationId(null);
+    setMessages([]);
+    storage.clearConversationState();
+  }
+
+  // Takes an explicit transcript base rather than reading the `messages`
+  // state variable from closure: within a single handleSend invocation,
+  // setMessages([]) (via clearStaleConversationState) does not update
+  // `messages` until the next render, so appending against the closure
+  // value would silently resurrect the pre-expiry transcript after a
+  // recovery. Threading the base explicitly avoids that stale-closure
+  // hazard.
+  function appendExchange(
+    base: ChatMessage[],
+    visitorContent: string,
+    assistantContent: string
+  ): ChatMessage[] {
+    const next: ChatMessage[] = [
+      ...base,
+      { id: crypto.randomUUID(), role: "visitor", content: visitorContent },
+      { id: crypto.randomUUID(), role: "assistant", content: assistantContent },
+    ];
+    setMessages(next);
+    storage.persistTranscript(next);
+    return next;
+  }
+
+  // Bounded send/recovery lifecycle (Section 3.A of the approved Task 4C
+  // specification). For one intentional visitor submission, at most
+  // three network requests occur: the initial message send; if and only
+  // if that is rejected as missing-or-expired, one replacement-
+  // conversation creation; and one resubmission of the exact original
+  // pending message. No second replacement creation, no second
+  // resubmission, and no repeated recovery cycle occurs under any
+  // circumstance -- a failure at the replacement-creation or
+  // resubmission step is routed through the same terminal-error
+  // presentation as any other send failure.
+  async function handleSend() {
+    const pendingContent = composerValue.trim();
+
+    if (!pendingContent || pending || sendLifecycleActiveRef.current) {
       return;
     }
 
+    sendLifecycleActiveRef.current = true;
     setPending(true);
     setSendErrorMessage(null);
 
-    let activeConversationId = conversationId;
+    try {
+      const priorConversationId = conversationId;
 
-    if (!activeConversationId) {
-      const createResult = await createConversation(visitorSessionId, publicChatbotIdentifier);
+      if (!priorConversationId) {
+        // AD-021 lazy creation, unchanged from Task 4A: no cached
+        // conversation to attempt continuation against.
+        const createResult = await createConversation(visitorSessionId, publicChatbotIdentifier);
 
-      if (!createResult.ok) {
-        setPending(false);
-        setSendErrorMessage(describeError(createResult.kind));
+        if (!createResult.ok) {
+          setSendErrorMessage(describeError(createResult.kind));
+          return;
+        }
+
+        updateConversationId(createResult.data.conversationId);
+
+        const sendResult = await sendMessage(
+          createResult.data.conversationId,
+          pendingContent,
+          publicChatbotIdentifier
+        );
+
+        if (!sendResult.ok) {
+          setSendErrorMessage(describeError(sendResult.kind));
+          return;
+        }
+
+        appendExchange(messages, pendingContent, sendResult.data.answer);
+        setComposerValue("");
         return;
       }
 
-      activeConversationId = createResult.data.conversationId;
-      setConversationId(activeConversationId);
+      // Attempt continuation using the (possibly restored) cached
+      // conversation id via the extracted, independently-verified
+      // production lifecycle (src/lib/widget-client/message-lifecycle.ts).
+      // The server is the sole authority on whether it is still valid --
+      // this is an attempt, not an assertion. onStaleConversationDetected
+      // clears stale state (visitorSessionId preserved) exactly once, no
+      // later than the point the rejection is recognized.
+      const lifecycleResult = await runConversationContinuationLifecycle(
+        {
+          conversationId: priorConversationId,
+          visitorSessionId,
+          publicChatbotIdentifier,
+          content: pendingContent,
+        },
+        {
+          sendMessage,
+          createConversation,
+          onStaleConversationDetected: clearStaleConversationState,
+        }
+      );
+
+      if (!lifecycleResult.ok) {
+        // A replacement conversation may have been created server-side
+        // even though this attempt still fails (resubmission failed
+        // after a successful replacement creation). Persist it before
+        // presenting the error so the next intentional retry continues
+        // against it instead of creating another conversation
+        // unnecessarily. No exchange is appended, the composer is left
+        // untouched (preserving the visitor's pending text), and no
+        // automatic retry occurs.
+        if (lifecycleResult.recoveredConversationId) {
+          updateConversationId(lifecycleResult.recoveredConversationId);
+        }
+        setSendErrorMessage(describeError(lifecycleResult.kind));
+        return;
+      }
+
+      updateConversationId(lifecycleResult.conversationId);
+
+      // recovered=true means the initial conversationId was rejected --
+      // build the transcript from an explicit empty base (never the
+      // `messages` closure, which would still hold the pre-expiry
+      // transcript) so stale history cannot be resurrected.
+      appendExchange(
+        lifecycleResult.recovered ? [] : messages,
+        pendingContent,
+        lifecycleResult.answer
+      );
+      setComposerValue("");
+    } finally {
+      setPending(false);
+      sendLifecycleActiveRef.current = false;
     }
-
-    const sendResult = await sendMessage(activeConversationId, content, publicChatbotIdentifier);
-
-    setPending(false);
-
-    if (!sendResult.ok) {
-      setSendErrorMessage(describeError(sendResult.kind));
-      return;
-    }
-
-    setMessages((previous) => [
-      ...previous,
-      { id: crypto.randomUUID(), role: "visitor", content },
-      { id: crypto.randomUUID(), role: "assistant", content: sendResult.data.answer },
-    ]);
-    setComposerValue("");
   }
 
   return (
