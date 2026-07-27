@@ -69,15 +69,60 @@ Starts the local development server. At the current implementation stage (Phase 
 
 Deployment targets Vercel, with Staging and Production using separate Supabase projects per ADR Decision 013. Live deployment has not yet been provisioned as of Phase 1 — see `docs/reference_implementations/project_01_ai_knowledge_base_chatbot/project_status_v1.md` in the governance repository for current status.
 
-## 11. Screenshots
+## 11. Embed Snippet Generation
+
+A repository-local developer utility (`scripts/generate-embed-snippet.ts`, Phase 7 Increment 3 Task 4D, AD-023) generates the real Public Chat Widget embed snippet. It is never deployed and never reachable over any network path — it must be run directly with Node:
+
+```bash
+node scripts/generate-embed-snippet.ts --target=staging
+node scripts/generate-embed-snippet.ts --target=production
+```
+
+Standalone Node execution does not automatically load `.env.local` — that only happens within Next's own `dev`/`build`/`start` lifecycle — so the required variables must already be present in the shell environment the command runs in.
+
+Each `--target` resolves one complete, isolated deployment profile; it never falls back to this project's generic `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SECRET_KEY`, and never mixes variables across targets.
+
+**`--target=staging` requires:**
+
+- `WIDGET_HOST_STAGING`
+- `SUPABASE_URL_STAGING`
+- `SUPABASE_SECRET_KEY_STAGING`
+
+**`--target=production` requires:**
+
+- `WIDGET_HOST_PRODUCTION`
+- `SUPABASE_URL_PRODUCTION`
+- `SUPABASE_SECRET_KEY_PRODUCTION`
+
+Example (bash) — Staging:
+
+```bash
+export WIDGET_HOST_STAGING=https://your-staging-app.vercel.app
+export SUPABASE_URL_STAGING=https://your-staging-project.supabase.co
+export SUPABASE_SECRET_KEY_STAGING=sb_secret_...
+node scripts/generate-embed-snippet.ts --target=staging
+```
+
+Example (bash) — Production:
+
+```bash
+export WIDGET_HOST_PRODUCTION=https://your-production-app.vercel.app
+export SUPABASE_URL_PRODUCTION=https://your-production-project.supabase.co
+export SUPABASE_SECRET_KEY_PRODUCTION=sb_secret_...
+node scripts/generate-embed-snippet.ts --target=production
+```
+
+The utility resolves the real `public_chatbot_identifier` from the selected target's own `chatbot_configuration` row — never a placeholder — and renders it into the snippet shape `public/widget-embed.js` actually consumes. See `.env.example` for the full variable list.
+
+## 12. Screenshots
 
 Not yet applicable — no user-facing functionality has been implemented.
 
-## 12. Future Enhancements
+## 13. Future Enhancements
 
 See `implementation_roadmap_v1.md` (Phases 2–10) in the governance repository for the full build sequence, and `architectural_decision_record_v1.md` for capabilities explicitly deferred beyond Version 1 (multi-tenant support, multiple chatbot configurations, granular role-based authorization, configurable data retention).
 
-## 13. License
+## 14. License
 
 Not yet determined.
 
