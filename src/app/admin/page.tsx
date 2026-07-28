@@ -27,6 +27,9 @@ export default async function AdminPage() {
       <Link href="/admin/documents" className="rounded border px-3 py-2">
         Document Management
       </Link>
+      <Link href="/admin/configuration" className="rounded border px-3 py-2">
+        Administrative Configuration
+      </Link>
       <SignOutButton />
     </main>
   );
