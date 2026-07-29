@@ -5,9 +5,11 @@ import { SignOutButton } from "./sign-out-button";
 
 // Minimal protected Admin Dashboard placeholder (Implementation Roadmap
 // Phase 3). Proves the authorization boundary end-to-end: only reachable
-// with a valid Supabase Auth session. Chatbot configuration, testing, and
-// analytics surfaces remain Phase 8 scope not yet implemented here;
-// Document Management now lives at /admin/documents (Phase 8, Increment 1).
+// with a valid Supabase Auth session. Analytics surfaces remain Phase 8
+// scope not yet implemented here; Document Management now lives at
+// /admin/documents (Phase 8, Increment 1), Administrative Configuration at
+// /admin/configuration (Phase 8, Increment 2), and Test/Preview at
+// /admin/preview (Phase 8, Increment 3).
 //
 // src/middleware.ts already redirects unauthenticated requests before
 // this page renders; this server-side check is defense-in-depth, per the
@@ -29,6 +31,9 @@ export default async function AdminPage() {
       </Link>
       <Link href="/admin/configuration" className="rounded border px-3 py-2">
         Administrative Configuration
+      </Link>
+      <Link href="/admin/preview" className="rounded border px-3 py-2">
+        Test / Preview
       </Link>
       <SignOutButton />
     </main>
