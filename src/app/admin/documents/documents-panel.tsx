@@ -10,6 +10,15 @@ type DocumentSummary = {
   uploadedAt: string;
 };
 
+// Mirrors processing.ts's ProcessDocumentResult exactly -- the discriminant
+// this panel must inspect before treating a manual processing request as
+// successful (response.ok alone only means the request was well-formed and
+// authorized, not that processing itself succeeded).
+type ProcessDocumentResponse =
+  | { status: "ready_for_review"; documentId: string; chunkCount: number }
+  | { status: "failed"; documentId: string; reason: string }
+  | { status: "skipped"; documentId: string; currentStatus: string };
+
 const DOCUMENTS_BUCKET = "documents";
 const ACCEPTED_CONTENT_TYPE = "application/pdf";
 
@@ -42,6 +51,9 @@ export function DocumentsPanel() {
 
   const [publishPendingId, setPublishPendingId] = useState<string | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
+
+  const [processPendingId, setProcessPendingId] = useState<string | null>(null);
+  const [processError, setProcessError] = useState<string | null>(null);
 
   const loadDocuments = useCallback(async () => {
     setListError(null);
@@ -198,6 +210,51 @@ export function DocumentsPanel() {
     }
   }
 
+  // Bounded administrator recovery action (Phase 8, Increment 3 correction):
+  // invokes the existing processDocument() service for a Document stuck in
+  // `uploaded` -- e.g. when the automatic asynchronous trigger never
+  // completed. Deliberately does not publish on success; publishing remains
+  // the separate, explicit action above.
+  async function handleProcess(documentId: string) {
+    if (processPendingId) {
+      return;
+    }
+
+    setProcessPendingId(documentId);
+    setProcessError(null);
+
+    try {
+      const response = await fetch(`/api/v1/documents/${documentId}/process`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => null);
+        setProcessError(body?.error ?? `Processing failed (status ${response.status}).`);
+        return;
+      }
+
+      // A 200 response only means the request was well-formed and
+      // authorized -- the discriminated result body is what determines
+      // whether processing actually succeeded, failed, or was skipped.
+      const result = (await response.json()) as ProcessDocumentResponse;
+
+      if (result.status === "failed") {
+        setProcessError(result.reason);
+      } else if (result.status === "skipped") {
+        setProcessError(
+          `Processing was skipped: this document is no longer eligible (current status "${result.currentStatus}").`
+        );
+      }
+
+      await loadDocuments();
+    } catch {
+      setProcessError("Processing failed.");
+    } finally {
+      setProcessPendingId(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <form onSubmit={handleUpload} className="flex items-center gap-3">
@@ -228,6 +285,12 @@ export function DocumentsPanel() {
         </p>
       ) : null}
 
+      {processError ? (
+        <p role="alert" className="text-sm text-red-700">
+          {processError}
+        </p>
+      ) : null}
+
       {listError ? (
         <p role="alert" className="text-sm text-red-700">
           {listError}
@@ -255,6 +318,16 @@ export function DocumentsPanel() {
                 <td className="py-2">{document.status}</td>
                 <td className="py-2">{new Date(document.uploadedAt).toLocaleString()}</td>
                 <td className="py-2">
+                  {document.status === "uploaded" ? (
+                    <button
+                      type="button"
+                      onClick={() => handleProcess(document.id)}
+                      disabled={processPendingId !== null}
+                      className="rounded border px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {processPendingId === document.id ? "Processing…" : "Process"}
+                    </button>
+                  ) : null}
                   {document.status === "ready_for_review" ? (
                     <button
                       type="button"

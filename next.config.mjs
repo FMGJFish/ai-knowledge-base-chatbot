@@ -18,7 +18,15 @@ const nextConfig = {
   // the real file at its real node_modules path at runtime. This is a
   // bundler-integration setting only -- it does not change what
   // text-extraction.ts calls or how it behaves.
-  serverExternalPackages: ["pdf-parse"],
+  //
+  // @napi-rs/canvas must be externalized alongside pdf-parse for the same
+  // reason: pdfjs-dist's Node build (imported by pdf-parse) requires it at
+  // module-evaluation time to polyfill DOMMatrix/ImageData/Path2D, and
+  // Next's file tracer does not detect that dependency's dynamically
+  // constructed require() call, so it was previously omitted from the
+  // deployed serverless function (per pdf-parse's own troubleshooting
+  // guide for Vercel/serverless deployments).
+  serverExternalPackages: ["pdf-parse", "@napi-rs/canvas"],
   // Frame-embedding policy (Phase 7, Increment 3, Task 3; AD-026). Exactly
   // one route -- /widget, the reserved iframe-hosted widget interface --
   // may be framed, and only by an HTTPS origin. The second source matches

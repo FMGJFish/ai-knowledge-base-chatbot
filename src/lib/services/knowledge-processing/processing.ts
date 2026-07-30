@@ -33,6 +33,17 @@ export type ProcessDocumentResult =
   | { status: "failed"; documentId: string; reason: string }
   | { status: "skipped"; documentId: string; currentStatus: string };
 
+// Distinguishes "no such Document" from every other failure mode, so a
+// caller (the administrator-initiated processing route) can narrowly map
+// this one case to a repository-consistent not-found response without a
+// broad catch that would also swallow genuine, unexpected defects.
+export class DocumentNotFoundError extends Error {
+  constructor(documentId: string) {
+    super(`Document not found for processing: ${documentId}.`);
+    this.name = "DocumentNotFoundError";
+  }
+}
+
 // Truncates and strips an error to a short, admin-safe description. Never
 // includes a stack trace, provider response body, secret, or token --
 // the error classes in text-extraction.ts and embedding.ts are already
@@ -46,39 +57,59 @@ function toSafeErrorDescription(error: unknown): string {
 export async function processDocument(documentId: string): Promise<ProcessDocumentResult> {
   const supabase = createServiceClient();
 
-  const { data: document, error: fetchError } = await supabase
-    .from("documents")
-    .select()
-    .eq("id", documentId)
-    .single();
-
-  if (fetchError || !document) {
-    throw new Error(`Document not found for processing: ${documentId}.`);
-  }
-
-  if (!document.storage_reference) {
-    throw new Error(`Document ${documentId} has no storage_reference to process.`);
-  }
-
-  // Idempotency guard: the trigger may legitimately fire more than once for
-  // the same Document (e.g. a retried internal call). Only a Document still
-  // in `uploaded` status is eligible to start processing -- this prevents a
-  // second invocation from clobbering a Document that has already reached
-  // `processing`, `ready_for_review`, or `failed`.
-  if (document.status !== "uploaded") {
-    return { status: "skipped", documentId, currentStatus: document.status };
-  }
-
-  const { error: markProcessingError } = await supabase
+  // Atomic claim: the guarded update itself is the concurrency control, not
+  // a prior read-then-write. Only a row currently in `uploaded` transitions
+  // to `processing`, and it does so for at most one caller -- a concurrent
+  // second invocation's identical update matches zero rows and must not
+  // proceed into extraction, chunking, embedding, or persistence. This
+  // mirrors the guarded-update-then-reconcile pattern already established
+  // by publishDocument() (publishing.ts) for the same class of race on the
+  // `ready_for_review` -> `published` transition.
+  const { data: claimed, error: claimError } = await supabase
     .from("documents")
     .update({ status: "processing" })
-    .eq("id", documentId);
+    .eq("id", documentId)
+    .eq("status", "uploaded")
+    .select()
+    .maybeSingle();
 
-  if (markProcessingError) {
-    throw new Error(`Failed to transition Document ${documentId} to processing.`);
+  if (claimError) {
+    throw new Error(`Failed to claim Document ${documentId} for processing: ${claimError.message}`);
   }
 
+  if (!claimed) {
+    // Zero rows matched: either the Document does not exist, or it exists
+    // but was not in `uploaded` at claim time (already `processing`,
+    // `ready_for_review`, `failed`, or `published` -- including a
+    // concurrent invocation that won the claim first). Reconciled against
+    // ground truth, never assumed, exactly as publishDocument() already
+    // does for its own guarded update.
+    const { data: current, error: fetchError } = await supabase
+      .from("documents")
+      .select("status")
+      .eq("id", documentId)
+      .maybeSingle();
+
+    if (fetchError) {
+      throw new Error(
+        `Failed to look up Document ${documentId} after claim attempt: ${fetchError.message}`
+      );
+    }
+
+    if (!current) {
+      throw new DocumentNotFoundError(documentId);
+    }
+
+    return { status: "skipped", documentId, currentStatus: current.status };
+  }
+
+  const document = claimed;
+
   try {
+    if (!document.storage_reference) {
+      throw new Error(`Document ${documentId} has no storage_reference to process.`);
+    }
+
     const { data: fileData, error: downloadError } = await supabase.storage
       .from(DOCUMENTS_BUCKET)
       .download(document.storage_reference);
