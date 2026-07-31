@@ -35,6 +35,9 @@ export default async function AdminPage() {
       <Link href="/admin/preview" className="rounded border px-3 py-2">
         Test / Preview
       </Link>
+      <Link href="/admin/analytics" className="rounded border px-3 py-2">
+        Analytics
+      </Link>
       <SignOutButton />
     </main>
   );
