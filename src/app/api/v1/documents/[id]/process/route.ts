@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getAdminUser } from "@/lib/supabase/session";
 import {
   DocumentNotFoundError,
   processDocument,
 } from "@/lib/services/knowledge-processing/processing";
+import { recordEvent } from "@/lib/services/analytics/analytics";
 
 // Documents API resource -- administrator-initiated processing retry
 // (Phase 8, Increment 3 bounded recovery correction). Recovers a Document
@@ -36,6 +37,21 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   // an unexpected defect still surfaces as-is rather than being masked.
   try {
     const result = await processDocument(id);
+
+    if (result.status === "ready_for_review") {
+      after(async () => {
+        try {
+          await recordEvent({
+            eventType: "document_processed",
+            referenceId: id,
+            referenceType: "document",
+          });
+        } catch {
+          // Best-effort, non-blocking (Phase 9 Increment 2 boundary).
+        }
+      });
+    }
+
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     if (error instanceof DocumentNotFoundError) {

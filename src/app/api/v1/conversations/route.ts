@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createConversation } from "@/lib/services/conversation/conversation";
 import { enforceRateLimit } from "@/lib/services/rate-limit/rate-limit";
 import { getClientIp } from "@/lib/services/rate-limit/request";
+import { recordEvent } from "@/lib/services/analytics/analytics";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -66,6 +67,18 @@ export async function POST(request: Request) {
   }
 
   const conversation = await createConversation(visitorSessionId);
+
+  after(async () => {
+    try {
+      await recordEvent({
+        eventType: "conversation_created",
+        referenceId: conversation.id,
+        referenceType: "conversation",
+      });
+    } catch {
+      // Best-effort, non-blocking (Phase 9 Increment 2 boundary).
+    }
+  });
 
   return NextResponse.json({ conversationId: conversation.id }, { status: 201 });
 }

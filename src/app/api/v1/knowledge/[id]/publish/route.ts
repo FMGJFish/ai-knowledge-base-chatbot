@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getAdminUser } from "@/lib/supabase/session";
 import { publishDocument } from "@/lib/services/knowledge-processing/publishing";
+import { recordEvent } from "@/lib/services/analytics/analytics";
 
 // Knowledge Management API resource -- publish action (Phase 4,
 // Increment 4). A distinct resource from Documents, per 04_api_design_v1.md
@@ -36,6 +37,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       { error: "document_not_ready_for_review", currentStatus: result.currentStatus },
       { status: 422 }
     );
+  }
+
+  if (result.outcome === "published") {
+    after(async () => {
+      try {
+        await recordEvent({
+          eventType: "document_published",
+          referenceId: id,
+          referenceType: "document",
+        });
+      } catch {
+        // Best-effort, non-blocking (Phase 9 Increment 2 boundary).
+      }
+    });
   }
 
   return NextResponse.json(

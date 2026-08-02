@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import {
   INTERNAL_SERVICE_SECRET_HEADER,
   verifyInternalServiceRequest,
 } from "@/lib/services/knowledge-processing/internal-auth";
 import { processDocument } from "@/lib/services/knowledge-processing/processing";
+import { recordEvent } from "@/lib/services/analytics/analytics";
 
 // Internal asynchronous processing trigger (Phase 4, Increment 3). Not a
 // public API resource -- authenticated by a shared internal secret, never
@@ -46,6 +47,20 @@ export async function POST(request: Request) {
   }
 
   const result = await processDocument(documentId);
+
+  if (result.status === "ready_for_review") {
+    after(async () => {
+      try {
+        await recordEvent({
+          eventType: "document_processed",
+          referenceId: documentId,
+          referenceType: "document",
+        });
+      } catch {
+        // Best-effort, non-blocking (Phase 9 Increment 2 boundary).
+      }
+    });
+  }
 
   return NextResponse.json(result, { status: 200 });
 }
