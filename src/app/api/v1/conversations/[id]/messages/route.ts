@@ -12,6 +12,14 @@ import { recordEvent } from "@/lib/services/analytics/analytics";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Conversation Input and Context Safety correction (Independent Review
+// Finding #3). Maximum length for a single submitted message, enforced
+// before any downstream service call. Generous for any real question (a
+// detailed multi-paragraph question is well under this), while preventing
+// an unbounded paste from ever reaching the Conversation Service, Retrieval
+// Service, or AI Response Service.
+const MAX_MESSAGE_CHARACTERS = 4_000;
+
 // Messages API resource (Phase 7, Increments 1-3). The sole Route Handler
 // authorized to orchestrate the Conversation Service, Retrieval Service,
 // and AI Response Service in sequence, per ADR Decision 015 and the Chief
@@ -58,6 +66,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "A non-empty content is required" }, { status: 400 });
   }
 
+  const trimmedContent = content.trim();
+
+  if (trimmedContent.length > MAX_MESSAGE_CHARACTERS) {
+    return NextResponse.json(
+      {
+        error: `Message exceeds the maximum allowed length of ${MAX_MESSAGE_CHARACTERS} characters`,
+      },
+      { status: 400 }
+    );
+  }
+
   if (typeof publicChatbotIdentifier !== "string" || !UUID_PATTERN.test(publicChatbotIdentifier)) {
     return NextResponse.json(
       { error: "A valid UUID publicChatbotIdentifier is required" },
@@ -75,8 +94,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
-  const trimmedContent = content.trim();
-
   const conversation = await getActiveConversation(id);
 
   if (!conversation) {
@@ -85,7 +102,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const history = await getConversationHistory(id);
   const chunks = await retrieveRelevantChunks(trimmedContent);
-  const answer = await generateResponse(trimmedContent, chunks, history);
+  const answer = await generateResponse(trimmedContent, chunks, history, id);
 
   await recordExchange(id, trimmedContent, answer);
 

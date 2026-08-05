@@ -42,6 +42,39 @@ const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
 const MAX_HONORED_SERVER_DELAY_MS = 60_000;
 
+// Prompt-envelope character budget (Conversation Input and Context Safety
+// correction, Independent Review Finding #3). Character-based, conservative
+// proxy for the configured model's token-based context window -- no
+// tokenizer dependency exists in this codebase; OpenAI's own published
+// guidance treats ~4 characters per token as typical for English text, so
+// this budget deliberately assumes a denser, less favorable ratio of ~3
+// characters per token throughout, to avoid underestimating real token
+// usage for atypically token-dense content (code, JSON, non-English text).
+//
+// OPENAI_CHAT_MODEL is currently configured as gpt-4o-mini (128,000-token
+// context window, 16,384-token max output -- OpenAI API model
+// documentation). This budget targets a small, comfortably conservative
+// fraction of that window (~20,000 tokens, ~15.6%), leaving the large
+// majority of the model's real context window entirely unused as
+// structural margin -- the goal is to never approach the real ceiling, not
+// to maximize utilization. Re-derive if OPENAI_CHAT_MODEL is ever
+// reconfigured to a model with a materially different context window.
+const PROMPT_ENVELOPE_BUDGET_CHARACTERS = 60_000; // ~20,000 tokens at ~3 chars/token.
+
+// Fixed reservation for the model's own response. Engineering judgment, not
+// a measured value -- this chatbot answers from retrieved knowledge-base
+// context and is expected to produce concise, grounded answers, not
+// long-form generation. Deliberately well below the model's 16,384-token
+// output ceiling. Bookkeeping only -- does not set a `max_tokens` request
+// parameter (a distinct corrective mechanism, out of this correction's
+// scope).
+const RESPONSE_RESERVE_CHARACTERS = 6_000; // ~2,000 tokens.
+
+// Fixed safety margin, distinct from the response reservation above,
+// absorbing character-to-token approximation error for atypically
+// token-dense input not otherwise covered by the conservative ratio.
+const SAFETY_HEADROOM_CHARACTERS = 6_000; // ~2,000 tokens, ~10% of the total budget.
+
 interface ChatCompletionResponse {
   choices?: Array<{
     message?: { content?: string | null };
@@ -175,6 +208,35 @@ function buildContextBlock(chunks: RetrievedChunk[]): string {
     .join("\n\n");
 }
 
+// Selects the largest whole-message suffix of `history` (newest message
+// first) that fits within `allowanceCharacters`, then restores it to
+// chronological order for forwarding (Finding #3). No partial message is
+// ever included: accumulation stops at the first message, going backward,
+// that does not fit entirely within what remains -- older messages beyond
+// that point are excluded whole, never truncated, preserving an unbroken
+// recent suffix of the conversation rather than a fragmented one. Full
+// stored history (the `history` argument itself) is never mutated.
+function selectBoundedHistory(
+  history: ConversationMessage[],
+  allowanceCharacters: number
+): ConversationMessage[] {
+  const selectedNewestFirst: ConversationMessage[] = [];
+  let remaining = allowanceCharacters;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const message = history[i];
+
+    if (!message || message.content.length > remaining) {
+      break;
+    }
+
+    selectedNewestFirst.push(message);
+    remaining -= message.content.length;
+  }
+
+  return selectedNewestFirst.reverse();
+}
+
 async function callChatCompletion(
   systemPrompt: string,
   question: string,
@@ -267,7 +329,8 @@ async function callChatCompletion(
 export async function generateResponse(
   question: string,
   retrievedChunks: RetrievedChunk[],
-  history: ConversationMessage[] = []
+  history: ConversationMessage[] = [],
+  conversationId?: string
 ): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -279,5 +342,39 @@ export async function generateResponse(
   const contextBlock = buildContextBlock(retrievedChunks);
   const systemPrompt = buildSystemPrompt(config, contextBlock);
 
-  return callChatCompletion(systemPrompt, question, history, apiKey, model);
+  // Prompt-envelope budgeting (Finding #3): the system prompt (actual,
+  // already computed above) and the current question (actual, already
+  // validated by the Route Handler's own maximum-length check) are reserved
+  // at their real measured size -- not a worst-case assumption -- alongside
+  // the two fixed reservations. Conversation history receives only
+  // whatever allowance remains.
+  const reservedCharacters =
+    systemPrompt.length +
+    question.length +
+    RESPONSE_RESERVE_CHARACTERS +
+    SAFETY_HEADROOM_CHARACTERS;
+
+  const historyAllowanceCharacters = Math.max(
+    0,
+    PROMPT_ENVELOPE_BUDGET_CHARACTERS - reservedCharacters
+  );
+
+  const boundedHistory = selectBoundedHistory(history, historyAllowanceCharacters);
+
+  // Zero-history floor (Finding #3): valid, non-error behavior. The
+  // request continues normally; this warning exists solely for operational
+  // observability and future diagnosis, not to signal a failure.
+  if (history.length > 0 && boundedHistory.length === 0) {
+    console.warn(
+      JSON.stringify({
+        event: "conversation_history_omitted",
+        reason: "prompt_envelope_allowance_exhausted",
+        conversationId: conversationId ?? null,
+        storedHistoryCount: history.length,
+        historyAllowanceCharacters,
+      })
+    );
+  }
+
+  return callChatCompletion(systemPrompt, question, boundedHistory, apiKey, model);
 }
