@@ -2,7 +2,7 @@
 
 Project 01 of the Fisher AI Automation Portfolio Development Program (FAAPDP).
 
-**Implementation status:** Implementation Roadmap Phase 1 — Project Foundation. Business functionality is not yet implemented; see [Implementation Status](#implementation-status) below.
+**Implementation status:** Implementation Roadmap Phases 1–9 — Complete. Phase 10 — Integration & Validation — in progress. Core business functionality (document processing, retrieval, AI responses, the public chat widget, the administration dashboard, and analytics) is implemented and live-verified; see [Implementation Status](#implementation-status) below.
 
 ---
 
@@ -20,7 +20,17 @@ An administrator uploads a PDF knowledge base. The system extracts, chunks, and 
 
 ## 4. Features
 
-Planned for Version 1 (per `01_business_requirements_v1.md`): PDF upload and processing, semantic retrieval, AI-generated grounded responses, an embeddable website widget, conversation history, an admin dashboard for configuration and testing, and basic usage analytics. Feature-by-feature implementation status is tracked in this repository's roadmap phases (see below).
+Implemented for Version 1 (per `01_business_requirements_v1.md`), through Implementation Roadmap Phases 1–9:
+
+- Administrator authentication (Supabase Auth-backed sign-in, multiple administrator accounts)
+- PDF upload, asynchronous processing, Ready-for-Review status, and explicit administrator publishing
+- Semantic retrieval over published knowledge and AI-generated grounded responses, with an insufficient-information fallback when retrieved context does not support an answer
+- A public, embeddable website chat widget with anonymous visitor sessions and conversation continuity
+- Conversation and message persistence
+- An administration dashboard for document management, chatbot configuration, and pre-publication testing
+- Usage analytics: event recording, an admin-gated API resource, and an analytics display panel
+
+Phase 10 — Integration & Validation — is in progress: an end-to-end system verification and an architecture/ADR/Technical Specification conformance review, prior to authoring the separate Testing Strategy and Deployment Plan (per ADR Decision 003).
 
 ## 5. Technology Stack
 
@@ -63,7 +73,7 @@ Copy `.env.example` to `.env.local` and populate the required values (OpenAI API
 npm run dev
 ```
 
-Starts the local development server. At the current implementation stage (Phase 1), this serves only the application foundation — no business functionality is implemented yet.
+Starts the local development server. The application is fully functional at this stage: an administrator can sign in, upload and publish PDF documents, and test chatbot behavior; the public chat widget serves grounded, AI-generated answers backed by published knowledge, with usage recorded in the admin analytics panel.
 
 ## 10. Deployment
 
@@ -116,7 +126,7 @@ The utility resolves the real `public_chatbot_identifier` from the selected targ
 
 ## 12. Screenshots
 
-Not yet applicable — no user-facing functionality has been implemented.
+Not included in this repository. The application can be exercised directly via `npm run dev`: the admin dashboard at `/admin`, the chatbot test/preview surface at `/admin/preview`, and the public widget at `/widget?publicChatbotIdentifier=<identifier>`.
 
 ## 13. Future Enhancements
 
@@ -133,12 +143,12 @@ Not yet determined.
 This repository is being built according to `implementation_roadmap_v1.md`. Current phase:
 
 - ✅ Phase 1 — Project Foundation
-- ⬜ Phase 2 — Database & Infrastructure
-- ⬜ Phase 3 — Authentication
-- ⬜ Phase 4 — Knowledge Processing Pipeline
-- ⬜ Phase 5 — Retrieval Engine
-- ⬜ Phase 6 — AI Response Engine
-- ⬜ Phase 7 — Public Chat Widget
-- ⬜ Phase 8 — Administration Dashboard
-- ⬜ Phase 9 — Analytics
-- ⬜ Phase 10 — Integration & Validation
+- ✅ Phase 2 — Database & Infrastructure
+- ✅ Phase 3 — Authentication
+- ✅ Phase 4 — Knowledge Processing Pipeline
+- ✅ Phase 5 — Retrieval Engine
+- ✅ Phase 6 — AI Response Engine
+- ✅ Phase 7 — Public Chat Widget
+- ✅ Phase 8 — Administration Dashboard
+- ✅ Phase 9 — Analytics
+- 🔄 Phase 10 — Integration & Validation (in progress)
