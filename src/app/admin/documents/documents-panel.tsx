@@ -8,6 +8,7 @@ type DocumentSummary = {
   filename: string;
   status: string;
   uploadedAt: string;
+  processingError: string | null;
 };
 
 // Mirrors processing.ts's ProcessDocumentResult exactly -- the discriminant
@@ -32,14 +33,18 @@ const ACCEPTED_CONTENT_TYPE = "application/pdf";
 // Storage using the returned signed URL -> POST /api/v1/documents/complete
 // (finalization).
 //
-// `processing_error` is not displayed here: the current backend API
-// contract (GET /api/v1/documents, GET /api/v1/documents/[id]) does not
-// expose that field. The Chief Systems Architect formally withdrew this
-// as an Increment 1 Success Criterion via Architectural Interpretation,
-// since exposing it would require expanding the Phase 4 API contract --
-// outside this increment's presentation-layer-only delegated authority.
-// Deferred to a future increment that explicitly authorizes backend API
-// expansion.
+// `processing_error` is displayed for `failed` Documents as of the Document
+// Processing Reliability and Recovery correction (Finding #2) -- the
+// backend API contract (GET /api/v1/documents, GET /api/v1/documents/[id])
+// now exposes this already-sanitized field via documents-query.ts.
+//
+// The "Process" action also now covers stale-processing recovery (Finding
+// #1): it renders for both `uploaded` and `processing` Documents and calls
+// the same existing endpoint in both cases. For a `processing` Document,
+// the server independently determines whether the lease has actually gone
+// stale (processing.ts) -- a still-legitimately-running Document returns a
+// `skipped` result, surfaced to the administrator exactly as any other
+// skip already is, never silently.
 export function DocumentsPanel() {
   const [documents, setDocuments] = useState<DocumentSummary[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -210,10 +215,14 @@ export function DocumentsPanel() {
     }
   }
 
-  // Bounded administrator recovery action (Phase 8, Increment 3 correction):
-  // invokes the existing processDocument() service for a Document stuck in
-  // `uploaded` -- e.g. when the automatic asynchronous trigger never
-  // completed. Deliberately does not publish on success; publishing remains
+  // Bounded administrator recovery action (Phase 8, Increment 3 correction;
+  // extended to cover stale `processing` Documents by the Document
+  // Processing Reliability and Recovery correction, Finding #1): invokes the
+  // existing processDocument() service for a Document stuck in `uploaded`
+  // (the automatic asynchronous trigger never completed) or, now, a
+  // Document stranded in `processing` whose lease has gone stale (the
+  // invocation itself was killed before reaching `ready_for_review` or
+  // `failed`). Deliberately does not publish on success; publishing remains
   // the separate, explicit action above.
   async function handleProcess(documentId: string) {
     if (processPendingId) {
@@ -243,7 +252,9 @@ export function DocumentsPanel() {
         setProcessError(result.reason);
       } else if (result.status === "skipped") {
         setProcessError(
-          `Processing was skipped: this document is no longer eligible (current status "${result.currentStatus}").`
+          result.currentStatus === "processing"
+            ? "This document is still actively processing and was not eligible for recovery yet."
+            : `Processing was skipped: this document is no longer eligible (current status "${result.currentStatus}").`
         );
       }
 
@@ -272,6 +283,17 @@ export function DocumentsPanel() {
           {uploadPending ? "Uploading…" : "Upload"}
         </button>
       </form>
+
+      {/* Informational only -- not enforced here. The upload authorization
+          endpoint enforces this same 10 MB ceiling (intake.ts's
+          MAX_DOCUMENT_SIZE_BYTES), established by live Staging measurement
+          and canonicalized by Chief Systems Architect approval (Document
+          Processing Reliability and Recovery correction, Delegation
+          Authority Amendment 1). */}
+      <p className="text-xs text-gray-600">
+        For reliable processing on this deployment, PDFs up to 10 MB are supported. Larger documents
+        may take longer to process than this deployment&apos;s execution limit allows.
+      </p>
 
       {uploadError ? (
         <p role="alert" className="text-sm text-red-700">
@@ -315,17 +337,28 @@ export function DocumentsPanel() {
             {documents.map((document) => (
               <tr key={document.id} className="border-b">
                 <td className="py-2">{document.filename}</td>
-                <td className="py-2">{document.status}</td>
+                <td className="py-2">
+                  {document.status}
+                  {document.status === "failed" && document.processingError ? (
+                    <p role="alert" className="mt-1 text-xs text-red-700">
+                      {document.processingError}
+                    </p>
+                  ) : null}
+                </td>
                 <td className="py-2">{new Date(document.uploadedAt).toLocaleString()}</td>
                 <td className="py-2">
-                  {document.status === "uploaded" ? (
+                  {document.status === "uploaded" || document.status === "processing" ? (
                     <button
                       type="button"
                       onClick={() => handleProcess(document.id)}
                       disabled={processPendingId !== null}
                       className="rounded border px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {processPendingId === document.id ? "Processing…" : "Process"}
+                      {processPendingId === document.id
+                        ? "Processing…"
+                        : document.status === "processing"
+                          ? "Recover"
+                          : "Process"}
                     </button>
                   ) : null}
                   {document.status === "ready_for_review" ? (

@@ -10,7 +10,7 @@ import { INTERNAL_SERVICE_SECRET_HEADER } from "./internal-auth";
 // perform only request-shape boundary validation and never evaluate policy
 // themselves (CSA ruling: Upload Intent Responsibility Boundary
 // Reconciliation).
-export const MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
+export const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED_CONTENT_TYPE = "application/pdf";
 const DOCUMENTS_BUCKET = "documents";
 

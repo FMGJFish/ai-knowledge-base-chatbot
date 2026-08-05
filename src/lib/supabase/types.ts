@@ -127,6 +127,7 @@ export type Database = {
           filename: string;
           id: string;
           processing_error: string | null;
+          processing_started_at: string | null;
           status: string;
           storage_reference: string | null;
           uploaded_at: string;
@@ -135,6 +136,7 @@ export type Database = {
           filename: string;
           id?: string;
           processing_error?: string | null;
+          processing_started_at?: string | null;
           status?: string;
           storage_reference?: string | null;
           uploaded_at?: string;
@@ -143,6 +145,7 @@ export type Database = {
           filename?: string;
           id?: string;
           processing_error?: string | null;
+          processing_started_at?: string | null;
           status?: string;
           storage_reference?: string | null;
           uploaded_at?: string;

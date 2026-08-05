@@ -11,12 +11,19 @@ import { createServiceClient } from "@/lib/supabase/server";
 // `storage_reference` (an internal, generated Storage object key) is
 // deliberately withheld from both the list and detail results below; it
 // has no admin-facing meaning yet and is not exposed merely because the
-// column exists.
+// column exists. `processing_error` is exposed as of the Document
+// Processing Reliability and Recovery correction (Finding #2) — already
+// sanitized/truncated at the point it is written (processing.ts's
+// toSafeErrorDescription()), so no further redaction is needed here.
+// `processing_started_at` (the active processing lease, Finding #1) remains
+// internal to processing.ts and is not exposed through this read path — it
+// has no administrative meaning beyond driving the stale-reclaim mechanism.
 export interface DocumentSummary {
   id: string;
   filename: string;
   status: string;
   uploadedAt: string;
+  processingError: string | null;
 }
 
 // Ordered by most recently uploaded first — the minimum deterministic
@@ -28,7 +35,7 @@ export async function listDocuments(): Promise<DocumentSummary[]> {
 
   const { data, error } = await supabase
     .from("documents")
-    .select("id, filename, status, uploaded_at")
+    .select("id, filename, status, uploaded_at, processing_error")
     .order("uploaded_at", { ascending: false });
 
   if (error) {
@@ -40,6 +47,7 @@ export async function listDocuments(): Promise<DocumentSummary[]> {
     filename: row.filename,
     status: row.status,
     uploadedAt: row.uploaded_at,
+    processingError: row.processing_error,
   }));
 }
 
@@ -50,7 +58,7 @@ export async function getDocumentById(id: string): Promise<DocumentDetailResult>
 
   const { data, error } = await supabase
     .from("documents")
-    .select("id, filename, status, uploaded_at")
+    .select("id, filename, status, uploaded_at, processing_error")
     .eq("id", id)
     .maybeSingle();
 
@@ -69,6 +77,7 @@ export async function getDocumentById(id: string): Promise<DocumentDetailResult>
       filename: data.filename,
       status: data.status,
       uploadedAt: data.uploaded_at,
+      processingError: data.processing_error,
     },
   };
 }

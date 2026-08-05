@@ -28,6 +28,22 @@ const DOCUMENTS_BUCKET = "documents";
 // persist stages on the same batch granularity.
 const CHUNK_PERSIST_BATCH_SIZE = 500;
 
+// Stale-processing recovery threshold (Document Processing Reliability and
+// Recovery correction, Finding #1). A `processing` Document whose lease
+// (processing_started_at) is older than this is treated as abandoned -- no
+// legitimate invocation for the approved supported workload can still be
+// running past this point. Chief Systems Architect-approved value (Delegation
+// Authority Amendment 1) -- derived from four live Staging measurements
+// against this Vercel Hobby deployment (300s hard ceiling), documented in
+// docs/session_records/project01_document_processing_reliability_delegation_package.md:
+// 169 chunks/7.1s, 678 chunks/12.8s, 1,356 chunks/29.1s, 2,754 chunks/96s.
+// Scaling was non-linear (accelerating) at the largest tested size, so this
+// value is anchored to the largest DIRECTLY MEASURED point (96s), not
+// extrapolated beyond it: 180s leaves ~84s (87%) headroom above that
+// measurement for execution-time variance, while remaining well under the
+// 300s ceiling.
+const STALE_PROCESSING_THRESHOLD_MS = 180_000;
+
 export type ProcessDocumentResult =
   | { status: "ready_for_review"; documentId: string; chunkCount: number }
   | { status: "failed"; documentId: string; reason: string }
@@ -67,7 +83,7 @@ export async function processDocument(documentId: string): Promise<ProcessDocume
   // `ready_for_review` -> `published` transition.
   const { data: claimed, error: claimError } = await supabase
     .from("documents")
-    .update({ status: "processing" })
+    .update({ status: "processing", processing_started_at: new Date().toISOString() })
     .eq("id", documentId)
     .eq("status", "uploaded")
     .select()
@@ -77,13 +93,48 @@ export async function processDocument(documentId: string): Promise<ProcessDocume
     throw new Error(`Failed to claim Document ${documentId} for processing: ${claimError.message}`);
   }
 
-  if (!claimed) {
-    // Zero rows matched: either the Document does not exist, or it exists
-    // but was not in `uploaded` at claim time (already `processing`,
-    // `ready_for_review`, `failed`, or `published` -- including a
-    // concurrent invocation that won the claim first). Reconciled against
-    // ground truth, never assumed, exactly as publishDocument() already
-    // does for its own guarded update.
+  let document = claimed;
+
+  if (!document) {
+    // Zero rows matched at the fresh-claim attempt: either the Document does
+    // not exist, it is not currently in `uploaded`, or a concurrent
+    // invocation already won the claim. Before reconciling to `skipped`,
+    // attempt a second, equally atomic reclaim for a `processing` Document
+    // whose lease has gone stale (Document Processing Reliability and
+    // Recovery correction, Finding #1) -- the identical guarded-update
+    // pattern as the fresh claim above: only a `processing` row whose lease
+    // predates the staleness cutoff transitions, and it does so for at most
+    // one caller. A null `processing_started_at` (a Document already stuck
+    // in `processing` from before this mechanism existed) is treated as
+    // equally eligible: no legitimate claim under this mechanism can ever
+    // have a null lease, so its absence cannot indicate an active invocation.
+    const staleCutoff = new Date(Date.now() - STALE_PROCESSING_THRESHOLD_MS).toISOString();
+
+    const { data: reclaimed, error: reclaimError } = await supabase
+      .from("documents")
+      .update({ status: "processing", processing_started_at: new Date().toISOString() })
+      .eq("id", documentId)
+      .eq("status", "processing")
+      .or(`processing_started_at.is.null,processing_started_at.lt.${staleCutoff}`)
+      .select()
+      .maybeSingle();
+
+    if (reclaimError) {
+      throw new Error(
+        `Failed to reclaim stale Document ${documentId} for processing: ${reclaimError.message}`
+      );
+    }
+
+    document = reclaimed;
+  }
+
+  if (!document) {
+    // Still zero rows matched: either the Document does not exist, or it is
+    // in a state this attempt was not eligible to claim (already
+    // `ready_for_review`/`failed`/`published`, or a `processing` Document
+    // whose lease has not yet gone stale -- still legitimately in flight).
+    // Reconciled against ground truth, never assumed, exactly as
+    // publishDocument() already does for its own guarded update.
     const { data: current, error: fetchError } = await supabase
       .from("documents")
       .select("status")
@@ -102,8 +153,6 @@ export async function processDocument(documentId: string): Promise<ProcessDocume
 
     return { status: "skipped", documentId, currentStatus: current.status };
   }
-
-  const document = claimed;
 
   try {
     if (!document.storage_reference) {
@@ -172,10 +221,14 @@ export async function processDocument(documentId: string): Promise<ProcessDocume
     // Successful processing explicitly clears processing_error to null --
     // relevant if this Document was previously retried after a failure
     // (a stale error description must never linger on a since-succeeded
-    // Document).
+    // Document). processing_started_at is cleared in the same update: the
+    // lease's purpose ends the moment processing leaves `processing` for
+    // any terminal reason (Document Processing Reliability and Recovery
+    // correction, Finding #1) -- a non-null lease has meaning only while
+    // status = 'processing'.
     const { error: markReadyError } = await supabase
       .from("documents")
-      .update({ status: "ready_for_review", processing_error: null })
+      .update({ status: "ready_for_review", processing_error: null, processing_started_at: null })
       .eq("id", documentId);
 
     if (markReadyError) {
@@ -186,9 +239,12 @@ export async function processDocument(documentId: string): Promise<ProcessDocume
   } catch (error) {
     const reason = toSafeErrorDescription(error);
 
+    // processing_started_at is cleared here too -- the failure transition is
+    // the other terminal exit from `processing` (Finding #1); the lease must
+    // not linger on a Document that is no longer being processed.
     await supabase
       .from("documents")
-      .update({ status: "failed", processing_error: reason })
+      .update({ status: "failed", processing_error: reason, processing_started_at: null })
       .eq("id", documentId);
 
     return { status: "failed", documentId, reason };
