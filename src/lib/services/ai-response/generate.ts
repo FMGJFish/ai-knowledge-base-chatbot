@@ -170,6 +170,14 @@ function getChatModel(): string {
 // and insufficient-information behavior is achieved entirely through this
 // instruction, never by an application-level shortcut that skips
 // invocation.
+//
+// Direct-entailment carve-out (A3 targeted generation rework, Product
+// Improvement Backlog): added after two-phase retrieval (A3) was found
+// insufficient alone -- the corrected chunk could be retrieved but the
+// model still declined to state its direct logical consequence. Narrowly
+// scoped to reasoning *from* the retrieved context, never *beyond* it: the
+// grounding and honest-refusal instruction above is unchanged and remains
+// first.
 function buildSystemPrompt(config: ChatbotConfiguration, contextBlock: string): string {
   const lines: string[] = [
     `You are ${config.name}, an AI assistant answering questions using only the knowledge base content provided below.`,
@@ -185,6 +193,10 @@ function buildSystemPrompt(config: ChatbotConfiguration, contextBlock: string): 
 
   lines.push(
     "If the provided context does not contain enough information to answer the question, say clearly that you do not have enough information to answer. Do not answer from general knowledge."
+  );
+
+  lines.push(
+    "You may state direct logical, arithmetic, date, quantity, or threshold consequences of the retrieved context applied to the user's question -- for example, if the context states a 45-day return window, you may state that a purchase from 60 days ago falls outside that window. Do not invent exceptions, fees, procedures, eligibility conditions, or policy details that are not present in the retrieved context, and do not assume the retrieved context extends to a scenario it does not explicitly cover (such as a specific dollar threshold, or a distinction between online and in-store purchases) merely because a related rule exists."
   );
 
   lines.push(`Context:\n${contextBlock}`);

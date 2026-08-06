@@ -3,11 +3,15 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { embedChunks } from "@/lib/services/knowledge-processing/embedding";
 import { getRetrievalConfig } from "./config";
 
-// Retrieval Service (Phase 5, Increment 1). Owns query embedding, exact
+// Retrieval Service (Phase 5, Increment 1; augmented-query construction
+// added by A3, Product Improvement Backlog). Owns query embedding, exact
 // pgvector similarity search, published-scope enforcement, threshold
 // filtering, and top-K selection. Read-only. Does not construct prompts or
 // generate responses (AI Response Service, Phase 6) and exposes no route,
-// endpoint, or UI (Increment 2, not yet delegated).
+// endpoint, or UI (Increment 2, not yet delegated). Also owns constructing
+// the bounded, history-augmented retrieval query used for the orchestrator's
+// conditional second retrieval attempt (see buildAugmentedRetrievalQuery) --
+// still query-string composition, not prompt construction or generation.
 export interface RetrievedChunk {
   chunkId: string;
   documentId: string;
@@ -30,6 +34,56 @@ export interface RetrievedChunk {
 // caller, consistent with the existing repository convention
 // (documents-query.ts, publishing.ts, embedding.ts all throw on
 // infrastructure failure rather than returning an empty/typed result).
+// Bounded character budget for the prior-exchange portion of an augmented
+// Phase 2 retrieval query (A3, Product Improvement Backlog). Deliberately
+// small relative to a typical question -- this is contextual seasoning for
+// the embedding, not a second source of primary signal. Mirrors the
+// whole-message-only, never-truncate discipline already established by
+// generate.ts's selectBoundedHistory.
+const AUGMENTED_QUERY_HISTORY_CHARACTER_BUDGET = 500;
+
+// Constructs the Phase 2 retrieval query (A3): the most recent completed
+// exchange -- previous user message, then previous assistant response, in
+// chronological order -- followed by the current question in full. The
+// current question is never capped or dropped; it is the primary signal
+// and must dominate the resulting embedding. If both prior messages
+// together exceed the character budget, the user message is dropped
+// first (the assistant's answer carries more retrieval-relevant
+// vocabulary and is kept preferentially); no message is ever partially
+// truncated. Returns the raw question unchanged when no prior exchange is
+// available (a conversation's first message has nothing to augment with).
+//
+// This function only constructs a string. It performs no embedding, no
+// retrieval, and no I/O -- callers remain solely responsible for deciding
+// when Phase 2 is invoked (Route Handler orchestration, ADR Decision
+// 015/021).
+export function buildAugmentedRetrievalQuery(
+  question: string,
+  previousUserMessage: string | null,
+  previousAssistantMessage: string | null
+): string {
+  if (previousUserMessage === null && previousAssistantMessage === null) {
+    return question;
+  }
+
+  let remaining = AUGMENTED_QUERY_HISTORY_CHARACTER_BUDGET;
+
+  const includeAssistant =
+    previousAssistantMessage !== null && previousAssistantMessage.length <= remaining;
+  if (includeAssistant) {
+    remaining -= previousAssistantMessage!.length;
+  }
+
+  const includeUser = previousUserMessage !== null && previousUserMessage.length <= remaining;
+
+  const parts: string[] = [];
+  if (includeUser) parts.push(previousUserMessage!);
+  if (includeAssistant) parts.push(previousAssistantMessage!);
+  parts.push(question);
+
+  return parts.join(" ");
+}
+
 export async function retrieveRelevantChunks(query: string): Promise<RetrievedChunk[]> {
   const [queryEmbedding] = await embedChunks([query]);
 

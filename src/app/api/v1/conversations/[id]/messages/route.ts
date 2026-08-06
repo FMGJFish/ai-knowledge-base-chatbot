@@ -4,7 +4,7 @@ import {
   getConversationHistory,
   recordExchange,
 } from "@/lib/services/conversation/conversation";
-import { retrieveRelevantChunks } from "@/lib/services/retrieval/retrieve";
+import { retrieveRelevantChunks, buildAugmentedRetrievalQuery } from "@/lib/services/retrieval/retrieve";
 import { generateResponse } from "@/lib/services/ai-response/generate";
 import { enforceRateLimit } from "@/lib/services/rate-limit/rate-limit";
 import { getClientIp } from "@/lib/services/rate-limit/request";
@@ -20,13 +20,18 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 // Service, or AI Response Service.
 const MAX_MESSAGE_CHARACTERS = 4_000;
 
-// Messages API resource (Phase 7, Increments 1-3). The sole Route Handler
-// authorized to orchestrate the Conversation Service, Retrieval Service,
-// and AI Response Service in sequence, per ADR Decision 015 and the Chief
-// Systems Architect Decision 001 precedent (Phase 6, Increment 2), now
-// extended to a three-service chain. Boundary validation, layered
-// rate-limit enforcement, and orchestration only -- no ranking, filtering,
-// embedding, generation, or persistence logic of its own.
+// Messages API resource (Phase 7, Increments 1-3; conditional second
+// retrieval attempt added by A3, Product Improvement Backlog). The sole
+// Route Handler authorized to orchestrate the Conversation Service,
+// Retrieval Service, and AI Response Service in sequence, per ADR Decision
+// 015 and the Chief Systems Architect Decision 001 precedent (Phase 6,
+// Increment 2), now extended to a three-service chain. Boundary validation,
+// layered rate-limit enforcement, and orchestration only -- no ranking,
+// filtering, embedding, generation, or persistence logic of its own. The
+// decision of *whether* a second retrieval attempt occurs is orchestration
+// (this Route Handler, based on Phase 1's result); the query string used for
+// that attempt is composed by Retrieval Service itself
+// (buildAugmentedRetrievalQuery), consistent with that boundary.
 //
 // Operates only within an existing, non-expired conversation (ADR Decision
 // 020) -- never creates one. An expired or unrecognized conversation
@@ -101,7 +106,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const history = await getConversationHistory(id);
-  const chunks = await retrieveRelevantChunks(trimmedContent);
+  let chunks = await retrieveRelevantChunks(trimmedContent);
+
+  // A3 (Product Improvement Backlog): Phase 2, conditional retrieval retry.
+  // Triggers only when Phase 1 (the unmodified question alone, above)
+  // returns zero qualifying chunks -- every request that already retrieves
+  // successfully takes the exact same path it takes today. History is
+  // strict alternating user/assistant pairs (recordExchange, ADR Decision
+  // 021), chronologically ascending; the most recent completed exchange is
+  // therefore the last two entries.
+  if (chunks.length === 0 && history.length >= 2) {
+    const previousAssistantMessage = history[history.length - 1]!.content;
+    const previousUserMessage = history[history.length - 2]!.content;
+
+    const augmentedQuery = buildAugmentedRetrievalQuery(
+      trimmedContent,
+      previousUserMessage,
+      previousAssistantMessage
+    );
+
+    const augmentedChunks = await retrieveRelevantChunks(augmentedQuery);
+
+    console.log(
+      JSON.stringify({
+        event: "retrieval_phase_two_triggered",
+        conversationId: id,
+        phaseTwoQualifyingChunks: augmentedChunks.length,
+      })
+    );
+
+    chunks = augmentedChunks;
+  }
+
   const answer = await generateResponse(trimmedContent, chunks, history, id);
 
   await recordExchange(id, trimmedContent, answer);
