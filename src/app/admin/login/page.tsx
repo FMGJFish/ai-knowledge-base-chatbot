@@ -67,6 +67,11 @@ export default function AdminLoginPage() {
   return (
     <main className="flex min-h-screen items-center justify-center p-6">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
+        <div className="mb-2 text-center">
+          <p className="text-xl font-semibold text-brand-700">ARIK</p>
+          <p className="text-sm text-gray-500">AI Knowledge Base & Customer Support Platform</p>
+        </div>
+
         <h1 className="text-xl font-semibold">Admin Sign In</h1>
 
         <div className="space-y-1">
@@ -81,7 +86,7 @@ export default function AdminLoginPage() {
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="w-full rounded border px-3 py-2"
+            className="w-full rounded-lg border px-3 py-2"
           />
         </div>
 
@@ -97,7 +102,7 @@ export default function AdminLoginPage() {
             required
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full rounded border px-3 py-2"
+            className="w-full rounded-lg border px-3 py-2"
           />
         </div>
 
@@ -110,7 +115,7 @@ export default function AdminLoginPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded bg-black px-3 py-2 text-white disabled:opacity-50"
+          className="w-full rounded-lg bg-brand-600 px-3 py-2 text-white disabled:opacity-50"
         >
           {isSubmitting ? "Signing in…" : "Sign In"}
         </button>

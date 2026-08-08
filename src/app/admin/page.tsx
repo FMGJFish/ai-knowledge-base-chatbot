@@ -24,18 +24,19 @@ export default async function AdminPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-start gap-4 p-6">
+      <p className="text-lg font-semibold text-brand-700">ARIK</p>
       <h1 className="text-xl font-semibold">Admin Dashboard</h1>
       <p>Signed in as {user.email}</p>
-      <Link href="/admin/documents" className="rounded border px-3 py-2">
+      <Link href="/admin/documents" className="rounded-lg bg-brand-600 px-3 py-2 text-white">
         Document Management
       </Link>
-      <Link href="/admin/configuration" className="rounded border px-3 py-2">
+      <Link href="/admin/configuration" className="rounded-lg bg-brand-600 px-3 py-2 text-white">
         Administrative Configuration
       </Link>
-      <Link href="/admin/preview" className="rounded border px-3 py-2">
+      <Link href="/admin/preview" className="rounded-lg bg-brand-600 px-3 py-2 text-white">
         Test / Preview
       </Link>
-      <Link href="/admin/analytics" className="rounded border px-3 py-2">
+      <Link href="/admin/analytics" className="rounded-lg bg-brand-600 px-3 py-2 text-white">
         Analytics
       </Link>
       <SignOutButton />
