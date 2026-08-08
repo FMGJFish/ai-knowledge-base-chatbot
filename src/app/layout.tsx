@@ -9,7 +9,8 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "ARIK — AI Knowledge Base & Customer Support Platform",
-  description: "Project 01 — Fisher AI Automation Portfolio Development Program",
+  description:
+    "ARIK is an AI knowledge base and customer support platform that uses retrieval-augmented generation to answer questions from your own content.",
 };
 
 export default function RootLayout({
