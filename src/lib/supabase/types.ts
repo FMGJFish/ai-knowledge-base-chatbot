@@ -2,7 +2,8 @@
 // migrations: chatbot_configuration.similarity_threshold/top_k,
 // match_document_chunks; Phase 7, Increment 2 migrations:
 // rate_limit_counters, increment_rate_limit_counter,
-// cleanup_stale_rate_limit_counters).
+// cleanup_stale_rate_limit_counters; A+4 Gate 2D migration:
+// get_eligible_knowledge_base_size).
 // Regenerate whenever the schema changes; do not hand-edit.
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -219,6 +220,13 @@ export type Database = {
       cleanup_stale_rate_limit_counters: {
         Args: { p_batch_size: number; p_retention_seconds: number };
         Returns: number;
+      };
+      get_eligible_knowledge_base_size: {
+        Args: never;
+        Returns: {
+          chunk_count: number;
+          total_characters: number;
+        }[];
       };
       increment_rate_limit_counter: {
         Args: { p_key_value: string; p_layer: string; p_window_seconds: number };
