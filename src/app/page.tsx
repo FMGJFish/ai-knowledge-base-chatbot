@@ -1,3 +1,5 @@
+const publicChatbotIdentifier = process.env.NEXT_PUBLIC_CHATBOT_IDENTIFIER;
+
 export default function Home() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-10 px-6 py-24 text-center">
@@ -37,14 +39,23 @@ export default function Home() {
         </div>
       </div>
 
-      <a
-        href="/widget?publicChatbotIdentifier=d4b00b03-e9d6-4421-a130-9cc95377b457"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="rounded-lg bg-brand-600 px-6 py-3 text-sm font-medium text-white"
-      >
-        Try the Live Demo
-      </a>
+      {publicChatbotIdentifier ? (
+        <a
+          href={`/widget?publicChatbotIdentifier=${publicChatbotIdentifier}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-lg bg-brand-600 px-6 py-3 text-sm font-medium text-white"
+        >
+          Try the Live Demo
+        </a>
+      ) : (
+        <span
+          aria-disabled="true"
+          className="rounded-lg bg-gray-300 px-6 py-3 text-sm font-medium text-gray-600"
+        >
+          Live Demo Unavailable
+        </span>
+      )}
 
       <p className="max-w-xl text-xs text-gray-500">
         Built with Next.js, Supabase, and OpenAI using retrieval-augmented generation and grounded
