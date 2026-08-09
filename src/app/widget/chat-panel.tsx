@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import Markdown from "react-markdown";
+import type { Components } from "react-markdown";
 
 export type ChatMessage = {
   id: string;
@@ -22,6 +24,55 @@ type ChatPanelProps = {
 };
 
 const ERROR_ID = "widget-composer-error";
+
+// Bounded Markdown presentation correction (pre-portfolio fix). Assistant
+// responses commonly contain Markdown (bold section labels, bullet lists)
+// that the model produces naturally; ARIK's chat surfaces previously
+// rendered this as literal text (raw ** and - characters visible), since
+// React's default `{content}` interpolation never parses it. This is a
+// presentation-only change -- it does not touch retrieval, generation, or
+// what content is produced, only how assistant messages are displayed.
+//
+// Security posture, deliberately narrow: only a fixed, safe subset of
+// elements is allowed -- paragraphs, bold, italic, lists/list items, and
+// inline code. Links and images are intentionally excluded entirely
+// (unwrapped to their text, or dropped) rather than rendered, since this is
+// a support-answer surface, not a rich-content renderer. Raw HTML embedded
+// in Markdown is never parsed into real DOM (`skipHtml`, and no `rehype-raw`
+// plugin is installed or referenced anywhere), so an assistant response
+// containing HTML/script-like text can never execute -- it is inert text.
+// This allow-list applies to assistant messages only; visitor/user messages
+// are never passed through this component (see the render branch below),
+// so a visitor's own message can never be interpreted as Markdown or HTML.
+const ALLOWED_MARKDOWN_ELEMENTS = ["p", "strong", "em", "ul", "ol", "li", "code", "br"];
+
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 list-disc space-y-0.5 pl-4 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 list-decimal space-y-0.5 pl-4 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="leading-snug">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  code: ({ children }) => (
+    <code className="rounded bg-gray-200 px-1 py-0.5 font-mono text-xs">{children}</code>
+  ),
+};
+
+// Assistant-only Markdown renderer. Never used for visitor messages --
+// keeping this a distinct component (rather than a conditional inside the
+// shared bubble) makes that split structurally visible, not just a
+// runtime branch.
+function AssistantMessageContent({ content }: { content: string }) {
+  return (
+    <Markdown
+      allowedElements={ALLOWED_MARKDOWN_ELEMENTS}
+      unwrapDisallowed
+      skipHtml
+      components={markdownComponents}
+    >
+      {content}
+    </Markdown>
+  );
+}
 
 // Chat panel: message log, welcome message, and composer (Phase 7,
 // Increment 3, Task 4A). A consumer of already-delivered state only --
@@ -89,13 +140,15 @@ export function ChatPanel({
             <span className="text-xs font-medium text-gray-500">
               {message.role === "visitor" ? "You" : chatbotName}
             </span>
-            <p
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                message.role === "visitor" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
-              }`}
-            >
-              {message.content}
-            </p>
+            {message.role === "visitor" ? (
+              <p className="max-w-[85%] rounded-lg bg-blue-600 px-3 py-2 text-sm text-white">
+                {message.content}
+              </p>
+            ) : (
+              <div className="max-w-[85%] rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-900">
+                <AssistantMessageContent content={message.content} />
+              </div>
+            )}
           </div>
         ))}
 
