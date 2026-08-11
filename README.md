@@ -2,7 +2,7 @@
 
 Project 01 of the Fisher AI Automation Portfolio Development Program (FAAPDP).
 
-**Implementation status:** Implementation Roadmap Phases 1–9 — Complete. Phase 10 — Integration & Validation — in progress. Core business functionality (document processing, retrieval, AI responses, the public chat widget, the administration dashboard, and analytics) is implemented and live-verified; see [Implementation Status](#implementation-status) below.
+**Implementation status:** Implementation Roadmap Phases 1–10 — Complete. Core business functionality (document processing, retrieval, AI responses, the public chat widget, the administration dashboard, and analytics) is implemented and live-verified; see [Implementation Status](#implementation-status) below. **Production deployed and operational:** https://ai-knowledge-base-chatbot.vercel.app
 
 ---
 
@@ -30,7 +30,7 @@ Implemented for Version 1 (per `01_business_requirements_v1.md`), through Implem
 - An administration dashboard for document management, chatbot configuration, and pre-publication testing
 - Usage analytics: event recording, an admin-gated API resource, and an analytics display panel
 
-Phase 10 — Integration & Validation — is in progress: an end-to-end system verification and an architecture/ADR/Technical Specification conformance review, prior to authoring the separate Testing Strategy and Deployment Plan (per ADR Decision 003).
+Phase 10 — Integration & Validation — is complete: an end-to-end system verification and an architecture/ADR/Technical Specification conformance review, per ADR Decision 003.
 
 ## 5. Technology Stack
 
@@ -77,7 +77,7 @@ Starts the local development server. The application is fully functional at this
 
 ## 10. Deployment
 
-Deployment targets Vercel, with Staging and Production using separate Supabase projects per ADR Decision 013. Live deployment has not yet been provisioned as of Phase 1 — see `docs/reference_implementations/project_01_ai_knowledge_base_chatbot/project_status_v1.md` in the governance repository for current status.
+Deployment targets Vercel, with Staging and Production using separate Supabase projects per ADR Decision 013. **Production is live at https://ai-knowledge-base-chatbot.vercel.app** — see `docs/reference_implementations/project_01_ai_knowledge_base_chatbot/project_status_v1.md` in the governance repository for current status.
 
 ## 11. Embed Snippet Generation
 
@@ -151,4 +151,4 @@ This repository is being built according to `implementation_roadmap_v1.md`. Curr
 - ✅ Phase 7 — Public Chat Widget
 - ✅ Phase 8 — Administration Dashboard
 - ✅ Phase 9 — Analytics
-- 🔄 Phase 10 — Integration & Validation (in progress)
+- ✅ Phase 10 — Integration & Validation
